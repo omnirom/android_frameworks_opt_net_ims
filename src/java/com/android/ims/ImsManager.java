@@ -49,6 +49,7 @@ import com.android.ims.internal.IImsUt;
 import com.android.ims.internal.ImsCallSession;
 import com.android.ims.internal.IImsConfig;
 import com.android.internal.annotations.VisibleForTesting;
+import com.android.internal.telephony.TelephonyProperties;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
@@ -1716,8 +1717,9 @@ public class ImsManager {
 
         call.setListener(listener);
         ImsCallSession session = createCallSession(sessionId, profile);
-
-        if ((callees != null) && (callees.length == 1)) {
+        boolean isConferenceUri = profile.getCallExtraBoolean(
+                TelephonyProperties.EXTRAS_IS_CONFERENCE_URI, false);
+        if (!isConferenceUri && (callees != null) && (callees.length == 1)) {
             call.start(session, callees[0]);
         } else {
             call.start(session, callees);
