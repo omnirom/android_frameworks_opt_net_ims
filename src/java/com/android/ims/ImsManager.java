@@ -818,6 +818,16 @@ public class ImsManager {
         setWfcModeInternalForSlot(wfcMode);
     }
 
+    public void updateDefaultWfcModeForSlot() {
+        if (DBG) log("updateWfcModeForSlot");
+        if (!getBooleanCarrierConfigForSlot(
+                CarrierConfigManager.KEY_EDITABLE_WFC_MODE_BOOL)) {
+            android.provider.Settings.Global.putInt(mContext.getContentResolver(),
+                    android.provider.Settings.Global.WFC_IMS_MODE, getIntCarrierConfigForSlot(
+                            CarrierConfigManager.KEY_CARRIER_DEFAULT_WFC_IMS_MODE_INT));
+        }
+    }
+
     /**
      * Returns the user configuration of WFC preference setting
      *
@@ -1358,6 +1368,7 @@ public class ImsManager {
         boolean isNetworkRoaming = TelephonyManager.getDefault().isNetworkRoaming();
         boolean available = isWfcEnabledByPlatformForSlot();
         boolean enabled = isWfcEnabledByUserForSlot();
+        updateDefaultWfcModeForSlot();
         int mode = getWfcModeForSlot(isNetworkRoaming);
         boolean roaming = isWfcRoamingEnabledByUserForSlot();
         boolean isFeatureOn = available && enabled;
