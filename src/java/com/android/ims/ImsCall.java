@@ -1797,8 +1797,10 @@ public class ImsCall implements ICall {
             String reasonInfo;
             int reasonCode = ImsReasonInfo.CODE_UNSPECIFIED;
             if (playDisconnectTone) {
+                reasonCode = ImsReasonInfo.CODE_USER_TERMINATED_BY_REMOTE;
                 reasonInfo = "Call ended by network";
             } else {
+                reasonCode = ImsReasonInfo.CODE_LOCAL_ENDED_BY_CONFERENCE_MERGE;
                 reasonInfo = "Call ended during conference merge process.";
                 reasonCode = ImsReasonInfo.CODE_USER_TERMINATED_BY_REMOTE;
             }
