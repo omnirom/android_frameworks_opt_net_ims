@@ -818,6 +818,16 @@ public class ImsManager {
         setWfcModeInternalForSlot(wfcMode);
     }
 
+    public void updateDefaultWfcModeForSlot() {
+        if (DBG) log("updateWfcModeForSlot");
+        if (!getBooleanCarrierConfigForSlot(
+                CarrierConfigManager.KEY_EDITABLE_WFC_MODE_BOOL)) {
+            android.provider.Settings.Global.putInt(mContext.getContentResolver(),
+                    android.provider.Settings.Global.WFC_IMS_MODE, getIntCarrierConfigForSlot(
+                            CarrierConfigManager.KEY_CARRIER_DEFAULT_WFC_IMS_MODE_INT));
+        }
+    }
+
     /**
      * Returns the user configuration of WFC preference setting
      *
@@ -1358,6 +1368,7 @@ public class ImsManager {
         boolean isNetworkRoaming = TelephonyManager.getDefault().isNetworkRoaming();
         boolean available = isWfcEnabledByPlatformForSlot();
         boolean enabled = isWfcEnabledByUserForSlot();
+        updateDefaultWfcModeForSlot();
         int mode = getWfcModeForSlot(isNetworkRoaming);
         boolean roaming = isWfcRoamingEnabledByUserForSlot();
         boolean isFeatureOn = available && enabled;
@@ -1422,7 +1433,17 @@ public class ImsManager {
         mImsConfigListener = listener;
     }
 
-    public void addNotifyStatusChangedCallback(ImsServiceProxy.INotifyStatusChanged c) {
+
+    /**
+     * Adds a callback for status changed events if the binder is already available. If it is not,
+     * this method will throw an ImsException.
+     */
+    public void addNotifyStatusChangedCallbackIfAvailable(ImsServiceProxy.INotifyStatusChanged c)
+            throws ImsException {
+        if (!mImsServiceProxy.isBinderAlive()) {
+            throw new ImsException("Binder is not active!",
+                    ImsReasonInfo.CODE_LOCAL_IMS_SERVICE_DOWN);
+        }
         if (c != null) {
             mStatusCallbacks.add(c);
         }
@@ -1833,8 +1854,6 @@ public class ImsManager {
     }
 
     public int getImsServiceStatus() throws ImsException {
-        checkAndThrowExceptionIfServiceUnavailable();
-
         return mImsServiceProxy.getFeatureStatus();
     }
 
@@ -1966,7 +1985,8 @@ public class ImsManager {
     }
 
     /**
-     * Binds the IMS service only if the service is not created.
+     * Checks to see if the ImsService Binder is connected. If it is not, we try to create the
+     * connection again.
      */
     private void checkAndThrowExceptionIfServiceUnavailable()
             throws ImsException {
@@ -2016,13 +2036,13 @@ public class ImsManager {
         TelephonyManager tm = (TelephonyManager)
                 mContext.getSystemService(Context.TELEPHONY_SERVICE);
         ImsServiceProxy serviceProxy = new ImsServiceProxy(mPhoneId, ImsFeature.MMTEL);
+        serviceProxy.setStatusCallback(() ->  mStatusCallbacks.forEach(
+                ImsServiceProxy.INotifyStatusChanged::notifyStatusChanged));
         // Returns null if the service is not available.
         IImsServiceController b = tm.getImsServiceControllerAndListen(mPhoneId,
                 ImsFeature.MMTEL, serviceProxy.getListener());
         if (b != null) {
             serviceProxy.setBinder(b.asBinder());
-            serviceProxy.setStatusCallback(() -> mStatusCallbacks.forEach(
-                            ImsServiceProxy.INotifyStatusChanged::notifyStatusChanged));
             // Trigger the cache to be updated for feature status.
             serviceProxy.getFeatureStatus();
         } else {
@@ -2042,9 +2062,13 @@ public class ImsManager {
     private ImsCallSession createCallSession(int serviceId,
             ImsCallProfile profile) throws ImsException {
         try {
+            // Throws an exception if the ImsService Feature is not ready to accept commands.
             return new ImsCallSession(mImsServiceProxy.createCallSession(serviceId, profile, null));
         } catch (RemoteException e) {
-            return null;
+            Rlog.w(TAG, "CreateCallSession: Error, remote exception: " + e.getMessage());
+            throw new ImsException("createCallSession()", e,
+                    ImsReasonInfo.CODE_LOCAL_IMS_SERVICE_DOWN);
+
         }
     }
 
