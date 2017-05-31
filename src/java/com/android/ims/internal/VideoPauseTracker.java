@@ -16,6 +16,7 @@
 
 package com.android.ims.internal;
 
+import android.telecom.Call;
 import android.telecom.Log;
 import android.telecom.VideoProfile;
 import android.util.ArraySet;
@@ -146,6 +147,26 @@ public class VideoPauseTracker {
     public boolean wasVideoPausedFromSource(int source) {
         synchronized (mPauseRequestsLock) {
             return mPauseRequests.contains(source);
+        }
+    }
+
+    /**
+     * Called when the associated call state changes.
+     */
+    public void onCallStateChanged(int newState) {
+        // Clear current video pause requests when call moves to hold state
+        if (newState == Call.STATE_HOLDING) {
+            clearVideoPauseRequests();
+        }
+    }
+
+    /**
+     * Clears all pause requests.
+     */
+    private void clearVideoPauseRequests() {
+        Log.v(this, "clearVideoPauseRequests");
+        synchronized (mPauseRequestsLock) {
+            mPauseRequests.clear();
         }
     }
 

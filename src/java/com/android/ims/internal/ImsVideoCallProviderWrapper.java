@@ -535,4 +535,11 @@ public class ImsVideoCallProviderWrapper extends Connection.VideoProvider {
     public void setUseVideoPauseWorkaround(boolean useVideoPauseWorkaround) {
         mUseVideoPauseWorkaround = useVideoPauseWorkaround;
     }
+
+    /**
+     * This is invoked when the state of the call associated changes.
+     */
+    public void onCallStateChanged(int newState) {
+        mVideoPauseTracker.onCallStateChanged(newState);
+    }
 }
