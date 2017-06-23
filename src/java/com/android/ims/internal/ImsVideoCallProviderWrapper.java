@@ -291,7 +291,15 @@ public class ImsVideoCallProviderWrapper extends Connection.VideoProvider {
             Log.i(this, "onSendSessionModifyRequest: fromVideoState=%s, toVideoState=%s; ",
                     VideoProfile.videoStateToString(fromProfile.getVideoState()),
                     VideoProfile.videoStateToString(toProfile.getVideoState()));
-            if (fromVideoState == toVideoState) {
+
+            // If remote device is in background, the call will be in paused state.
+            // In that state if this device also goes to background, we need to inform modem that
+            // we are currently multi tasking. This is needed so that when remote device tries
+            // to resume video, it should remain in paused state as long as we are multi tasking.
+            boolean isPauseSpecialCase = VideoProfile.isPaused(fromVideoState) &&
+                    VideoProfile.isPaused(toVideoState);
+
+            if (!isPauseSpecialCase && (fromVideoState == toVideoState)) {
                 return;
             }
             mVideoCallProvider.sendSessionModifyRequest(fromProfile, toProfile);
