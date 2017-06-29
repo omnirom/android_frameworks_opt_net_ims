@@ -156,15 +156,15 @@ public class VideoPauseTracker {
     public void onCallStateChanged(int newState) {
         // Clear current video pause requests when call moves to hold state
         if (newState == Call.STATE_HOLDING) {
-            clearVideoPauseRequests();
+            clearPauseRequests();
         }
     }
 
     /**
-     * Clears all pause requests.
+     * Clears pending pause requests for the tracker.
      */
-    private void clearVideoPauseRequests() {
-        Log.v(this, "clearVideoPauseRequests");
+    public void clearPauseRequests() {
+        Log.v(this, "clearPauseRequests");
         synchronized (mPauseRequestsLock) {
             mPauseRequests.clear();
         }
