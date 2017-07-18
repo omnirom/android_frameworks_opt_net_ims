@@ -28,6 +28,7 @@ import android.content.Context;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Message;
+import android.os.Parcel;
 import android.telecom.ConferenceParticipant;
 import android.telecom.Connection;
 import android.telephony.Rlog;
@@ -419,6 +420,33 @@ public class ImsCall implements ICall {
          */
         public void onCallHandover(ImsCall imsCall, int srcAccessTech, int targetAccessTech,
             ImsReasonInfo reasonInfo) {
+        }
+
+        /**
+         * Called when the remote party issues an RTT modify request
+         *
+         * @param imsCall ImsCall object
+         */
+        public void onRttModifyRequestReceived(ImsCall imsCall) {
+        }
+
+        /**
+         * Called when the remote party responds to a locally-issued RTT request.
+         *
+         * @param imsCall ImsCall object
+         * @param status The status of the request. See
+         *               {@link Connection.RttModifyStatus} for possible values.
+         */
+        public void onRttModifyResponseReceived(ImsCall imsCall, int status) {
+        }
+
+        /**
+         * Called when the remote party has sent some characters via RTT
+         *
+         * @param imsCall ImsCall object
+         * @param message A string containing the transmitted characters.
+         */
+        public void onRttMessageReceived(ImsCall imsCall, String message) {
         }
 
         /**
@@ -1585,6 +1613,64 @@ public class ImsCall implements ICall {
         }
     }
 
+    public void sendRttMessage(String rttMessage) {
+        synchronized(mLockObj) {
+            if (mSession == null) {
+                loge("sendRttMessage::no session");
+            }
+            if (!mCallProfile.mMediaProfile.isRttCall()) {
+                logi("sendRttMessage::Not an rtt call, ignoring");
+                return;
+            }
+            mSession.sendRttMessage(rttMessage);
+        }
+    }
+
+    /**
+     * Sends a user-requested RTT upgrade request.
+     */
+    public void sendRttModifyRequest() {
+        logi("sendRttModifyRequest");
+
+        synchronized(mLockObj) {
+            if (mSession == null) {
+                loge("sendRttModifyRequest::no session");
+            }
+            if (mCallProfile.mMediaProfile.isRttCall()) {
+                logi("sendRttModifyRequest::Already RTT call, ignoring.");
+                return;
+            }
+            // Make a copy of the current ImsCallProfile and modify it to enable RTT
+            Parcel p = Parcel.obtain();
+            mCallProfile.writeToParcel(p, 0);
+            ImsCallProfile requestedProfile = new ImsCallProfile(p);
+            requestedProfile.mMediaProfile.setRttMode(ImsStreamMediaProfile.RTT_MODE_FULL);
+
+            mSession.sendRttModifyRequest(requestedProfile);
+        }
+    }
+
+    /**
+     * Sends the user's response to a remotely-issued RTT upgrade request
+     *
+     * @param textStream A valid {@link Connection.RttTextStream} if the user
+     *                   accepts, {@code null} if not.
+     */
+    public void sendRttModifyResponse(boolean status) {
+        logi("sendRttModifyResponse");
+
+        synchronized(mLockObj) {
+            if (mSession == null) {
+                loge("sendRttModifyResponse::no session");
+            }
+            if (mCallProfile.mMediaProfile.isRttCall()) {
+                logi("sendRttModifyResponse::Already RTT call, ignoring.");
+                return;
+            }
+            mSession.sendRttModifyResponse(status);
+        }
+    }
+
     private void clear(ImsReasonInfo lastReasonInfo) {
         mInCall = false;
         mHold = false;
@@ -2174,7 +2260,7 @@ public class ImsCall implements ICall {
      * @param rttMessage rtt text to be sent
      * @throws ImsException if call is absent
      */
-    public void sendRttMessage(String rttMessage) throws ImsException {
+    /*public void sendRttMessage(String rttMessage) throws ImsException {
         logi("sendRttMessage :: message = " + rttMessage);
 
         synchronized(mLockObj) {
@@ -2185,7 +2271,7 @@ public class ImsCall implements ICall {
             }
             mSession.sendRttMessage(rttMessage);
         }
-    }
+    }*/
 
     /**
      * Sends RTT Upgrade request
@@ -2212,7 +2298,7 @@ public class ImsCall implements ICall {
      * @param response : response for upgrade
      * @throws CallStateException
      */
-    public void sendRttModifyResponse(boolean response) throws ImsException {
+    /*public void sendRttModifyResponse(boolean response) throws ImsException {
         logi("RTT: sendRttModifyResponse");
 
         synchronized(mLockObj) {
@@ -2223,7 +2309,7 @@ public class ImsCall implements ICall {
             }
             mSession.sendRttModifyResponse(response);
         }
-    }
+    }*/
 
     @VisibleForTesting
     public class ImsCallSessionListenerProxy extends ImsCallSession.Listener {
@@ -3079,20 +3165,25 @@ public class ImsCall implements ICall {
         }
 
         @Override
-        public void callSessionRttMessageReceived(String rttMessage) {
-            logi("RTT: callSessionRttMessageReceived :: rttMsg = " + rttMessage);
-
+        public void callSessionRttModifyRequestReceived(ImsCallSession session,
+                ImsCallProfile callProfile) {
             ImsCall.Listener listener;
 
             synchronized(ImsCall.this) {
                 listener = mListener;
             }
 
+            if (!callProfile.mMediaProfile.isRttCall()) {
+                logi("callSessionRttModifyRequestReceived:: ignoring request, requested profile " +
+                        "is not RTT.");
+                return;
+            }
+
             if (listener != null) {
                 try {
-                    listener.onCallSessionRttMessageReceived(rttMessage);
+                    listener.onRttModifyRequestReceived(ImsCall.this);
                 } catch (Throwable t) {
-                    loge("RTT: callSessionRttMessageReceived :: ", t);
+                    loge("callSessionRttModifyRequestReceived:: ", t);
                 }
             }
         }
@@ -3109,18 +3200,15 @@ public class ImsCall implements ICall {
 
             if (listener != null) {
                 try {
-                    listener.onCallSessionRttModifyResponseReceived(status);
+                    listener.onRttModifyResponseReceived(ImsCall.this, status);
                 } catch (Throwable t) {
-                    loge("RTT: callSessionRttModifyResponseReceived :: ", t);
+                    loge("callSessionRttModifyResponseReceived:: ", t);
                 }
             }
         }
 
         @Override
-        public void callSessionRttModifyRequestReceived(ImsCallSession session,
-                ImsCallProfile callProfile) {
-            logi("RTT: callSessionRttModifyRequestReceived");
-
+        public void callSessionRttMessageReceived(String rttMessage) {
             ImsCall.Listener listener;
 
             synchronized(ImsCall.this) {
@@ -3129,13 +3217,12 @@ public class ImsCall implements ICall {
 
             if (listener != null) {
                 try {
-                    listener.onCallSessionRttModifyReceived(ImsCall.this, callProfile);
+                    listener.onRttMessageReceived(ImsCall.this, rttMessage);
                 } catch (Throwable t) {
-                    loge("RTT: callSessionRttModifyRequestReceived :: ", t);
+                    loge("callSessionRttModifyResponseReceived:: ", t);
                 }
             }
         }
-
     }
 
     /**
@@ -3277,7 +3364,7 @@ public class ImsCall implements ICall {
      *
      * @return {@code true} if a merge into a conference is pending, {@code false} otherwise.
      */
-    private boolean isCallSessionMergePending() {
+    public boolean isCallSessionMergePending() {
         return mCallSessionMergePending;
     }
 
