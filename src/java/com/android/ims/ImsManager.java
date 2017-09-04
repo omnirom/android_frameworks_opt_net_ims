@@ -1297,6 +1297,13 @@ public class ImsManager {
             }
         }
 
+        int subId = getSubId(mPhoneId);
+
+        if (!SubscriptionManager.from(mContext).isActiveSubId(subId)) {
+            log("updateImsServiceConfigForSlot: subId not active: " + subId);
+            return;
+        }
+
         if (!mConfigUpdated || force) {
             try {
                 updateProvisionedValues();
@@ -1367,7 +1374,7 @@ public class ImsManager {
         boolean enabled = isVtEnabledByUserForSlot();
         boolean isNonTty = isNonTtyOrTtyOnVolteEnabledForSlot();
         boolean isDataEnabled = isDataEnabled();
-        boolean ignoreDataEnabledChanged = getBooleanCarrierConfig(mContext,
+        boolean ignoreDataEnabledChanged = getBooleanCarrierConfigForSlot(
                 CarrierConfigManager.KEY_IGNORE_DATA_ENABLED_CHANGED_FOR_VIDEO_CALLS);
 
         boolean isFeatureOn = available && enabled && isNonTty
@@ -1398,14 +1405,19 @@ public class ImsManager {
         boolean roaming = isWfcRoamingEnabledByUserForSlot();
         boolean available = isWfcEnabledByPlatformForSlot();
         boolean enabled = isWfcEnabledByUserForSlot();
+        final int subId = getSubId(mPhoneId);
+        final TelephonyManager telephonyManager = (TelephonyManager)
+                mContext.getSystemService(Context.TELEPHONY_SERVICE);
+        boolean isNetworkRoaming = telephonyManager.isNetworkRoaming(subId);
         updateDefaultWfcModeForSlot();
-        int mode = getWfcModeForSlot(roaming);
+        int mode = getWfcModeForSlot(isNetworkRoaming);
         boolean isFeatureOn = available && enabled;
 
         log("updateWfcFeatureAndProvisionedValues: available = " + available
                 + ", enabled = " + enabled
                 + ", mode = " + mode
-                + ", roaming = " + roaming);
+                + ", roaming = " + roaming
+                + ", isNetworkRoaming = " + isNetworkRoaming);
 
         getConfigInterface().setFeatureValue(
                 ImsConfig.FeatureConstants.FEATURE_TYPE_VOICE_OVER_WIFI,
