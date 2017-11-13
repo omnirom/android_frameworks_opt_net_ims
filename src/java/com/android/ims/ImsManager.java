@@ -49,6 +49,7 @@ import com.android.ims.internal.IImsUt;
 import com.android.ims.internal.ImsCallSession;
 import com.android.ims.internal.IImsConfig;
 import com.android.internal.annotations.VisibleForTesting;
+import com.android.internal.telephony.TelephonyProperties;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
@@ -228,7 +229,12 @@ public class ImsManager {
     public static ImsManager getInstance(Context context, int phoneId) {
         synchronized (sImsManagerInstances) {
             if (sImsManagerInstances.containsKey(phoneId)) {
-                return sImsManagerInstances.get(phoneId);
+                ImsManager m = sImsManagerInstances.get(phoneId);
+                // May be null for some tests
+                if (m != null) {
+                    m.connectIfServiceIsAvailable();
+                }
+                return m;
             }
 
             ImsManager mgr = new ImsManager(context, phoneId);
@@ -268,9 +274,11 @@ public class ImsManager {
                 CarrierConfigManager.KEY_EDITABLE_ENHANCED_4G_LTE_BOOL)) {
             return true;
         }
+        int subId = getSubId(mPhoneId);
+        log("isEnhanced4gLteModeSettingEnabledByUserForSlot :: subId=" + subId);
         int enabled = android.provider.Settings.Global.getInt(
                 mContext.getContentResolver(),
-                android.provider.Settings.Global.ENHANCED_4G_MODE_ENABLED,
+                android.provider.Settings.Global.ENHANCED_4G_MODE_ENABLED + subId,
                 ImsConfig.FeatureValueConstants.ON);
         return (enabled == 1);
     }
@@ -286,7 +294,7 @@ public class ImsManager {
         android.provider.Settings.Global.putInt(
                 context.getContentResolver(),
                 android.provider.Settings.Global.ENHANCED_4G_MODE_ENABLED, value);
-
+        log("setEnhanced4gLteModeSetting ::");
         if (isNonTtyOrTtyOnVolteEnabled(context)) {
             ImsManager imsManager = ImsManager.getInstance(context,
                     SubscriptionManager.getDefaultVoicePhoneId());
@@ -310,10 +318,12 @@ public class ImsManager {
         // If false, we must always keep advanced 4G mode set to true (1).
         int value = getBooleanCarrierConfigForSlot(
                 CarrierConfigManager.KEY_EDITABLE_ENHANCED_4G_LTE_BOOL) ? (enabled ? 1: 0) : 1;
+        int subId = getSubId(mPhoneId);
 
+        log("setEnhanced4gLteModeSettingForSlot :: subId=" + subId + " enabled=" + enabled);
         try {
             int prevSetting = android.provider.Settings.Global.getInt(mContext.getContentResolver(),
-                    android.provider.Settings.Global.ENHANCED_4G_MODE_ENABLED);
+                    android.provider.Settings.Global.ENHANCED_4G_MODE_ENABLED + subId);
             if (prevSetting == value) {
                 // Don't trigger setAdvanced4GMode if the setting hasn't changed.
                 return;
@@ -323,7 +333,7 @@ public class ImsManager {
         }
 
         android.provider.Settings.Global.putInt(mContext.getContentResolver(),
-                android.provider.Settings.Global.ENHANCED_4G_MODE_ENABLED, value);
+                android.provider.Settings.Global.ENHANCED_4G_MODE_ENABLED + subId, value);
         if (isNonTtyOrTtyOnVolteEnabledForSlot()) {
             try {
                 setAdvanced4GMode(enabled);
@@ -551,8 +561,10 @@ public class ImsManager {
      * Returns the user configuration of VT setting per slot.
      */
     public boolean isVtEnabledByUserForSlot() {
+        int subId = getSubId(mPhoneId);
+        log("isVtEnabledByUserForSlot :: subId=" + subId);
         int enabled = android.provider.Settings.Global.getInt(mContext.getContentResolver(),
-                android.provider.Settings.Global.VT_IMS_ENABLED,
+                android.provider.Settings.Global.VT_IMS_ENABLED + subId,
                 ImsConfig.FeatureValueConstants.ON);
         return (enabled == 1);
     }
@@ -598,9 +610,11 @@ public class ImsManager {
      * Change persistent VT enabled setting for slot.
      */
     public void setVtSettingForSlot(boolean enabled) {
+        int subId = getSubId(mPhoneId);
+        log("setVtSettingForSlot :: subId=" + subId);
         int value = enabled ? 1 : 0;
         android.provider.Settings.Global.putInt(mContext.getContentResolver(),
-                android.provider.Settings.Global.VT_IMS_ENABLED, value);
+                android.provider.Settings.Global.VT_IMS_ENABLED + subId, value);
 
         try {
             ImsConfig config = getConfigInterface();
@@ -672,11 +686,13 @@ public class ImsManager {
      * Returns the user configuration of WFC setting for slot.
      */
     public boolean isWfcEnabledByUserForSlot() {
+        int subId = getSubId(mPhoneId);
         int enabled = android.provider.Settings.Global.getInt(mContext.getContentResolver(),
-                android.provider.Settings.Global.WFC_IMS_ENABLED,
+                android.provider.Settings.Global.WFC_IMS_ENABLED + subId,
                 getBooleanCarrierConfigForSlot(
                         CarrierConfigManager.KEY_CARRIER_DEFAULT_WFC_IMS_ENABLED_BOOL) ?
                         ImsConfig.FeatureValueConstants.ON : ImsConfig.FeatureValueConstants.OFF);
+        log("isWfcEnabledByUserForSlot :: subId=" + subId + " enabled=" + enabled);
         return enabled == 1;
     }
 
@@ -729,10 +745,14 @@ public class ImsManager {
      */
     public void setWfcSettingForSlot(boolean enabled) {
         int value = enabled ? 1 : 0;
+        int subId = getSubId(mPhoneId);
+        final TelephonyManager telephonyManager = (TelephonyManager)
+                mContext.getSystemService(Context.TELEPHONY_SERVICE);
         android.provider.Settings.Global.putInt(mContext.getContentResolver(),
-                android.provider.Settings.Global.WFC_IMS_ENABLED, value);
-
-        setWfcNonPersistentForSlot(enabled, getWfcModeForSlot());
+                android.provider.Settings.Global.WFC_IMS_ENABLED + subId, value);
+        log("setWfcSettingForSlot :: subId=" + subId + " enabled=" + enabled);
+        setWfcNonPersistentForSlot(enabled, getWfcModeForSlot(
+                telephonyManager.isNetworkRoaming(subId)));
     }
 
     /**
@@ -787,9 +807,12 @@ public class ImsManager {
      * Returns the user configuration of WFC preference setting
      */
     public int getWfcModeForSlot() {
+        int subId = getSubId(mPhoneId);
         int setting = android.provider.Settings.Global.getInt(mContext.getContentResolver(),
-                android.provider.Settings.Global.WFC_IMS_MODE, getIntCarrierConfigForSlot(
-                        CarrierConfigManager.KEY_CARRIER_DEFAULT_WFC_IMS_MODE_INT));
+                android.provider.Settings.Global.WFC_IMS_MODE + subId,
+                        getIntCarrierConfigForSlot(
+                                CarrierConfigManager.KEY_CARRIER_DEFAULT_WFC_IMS_MODE_INT));
+        log("getWfcModeForSlot :: subId=" + subId + " setting=" + setting);
         if (DBG) log("getWfcMode - setting=" + setting);
         return setting;
     }
@@ -811,11 +834,23 @@ public class ImsManager {
      * Change persistent WFC preference setting for slot.
      */
     public void setWfcModeForSlot(int wfcMode) {
-        if (DBG) log("setWfcModeForSlot - setting=" + wfcMode);
+        int subId = getSubId(mPhoneId);
+        if (DBG) log("setWfcModeForSlot - setting=" + wfcMode + ", subId=" + subId);
         android.provider.Settings.Global.putInt(mContext.getContentResolver(),
-                android.provider.Settings.Global.WFC_IMS_MODE, wfcMode);
-
+                android.provider.Settings.Global.WFC_IMS_MODE + subId, wfcMode);
         setWfcModeInternalForSlot(wfcMode);
+    }
+
+    public void updateDefaultWfcModeForSlot() {
+        int subId = getSubId(mPhoneId);
+        if (DBG) log("updateWfcModeForSlot");
+        if (!getBooleanCarrierConfigForSlot(
+                CarrierConfigManager.KEY_EDITABLE_WFC_MODE_BOOL)) {
+            android.provider.Settings.Global.putInt(mContext.getContentResolver(),
+                    android.provider.Settings.Global.WFC_IMS_MODE + subId,
+                    getIntCarrierConfigForSlot(
+                    CarrierConfigManager.KEY_CARRIER_DEFAULT_WFC_IMS_MODE_INT));
+        }
     }
 
     /**
@@ -836,7 +871,7 @@ public class ImsManager {
             setting = android.provider.Settings.Global.getInt(context.getContentResolver(),
                     android.provider.Settings.Global.WFC_IMS_ROAMING_MODE,
                     getIntCarrierConfig(context,
-                            CarrierConfigManager.KEY_CARRIER_DEFAULT_WFC_IMS_ROAMING_MODE_INT));
+                    CarrierConfigManager.KEY_CARRIER_DEFAULT_WFC_IMS_ROAMING_MODE_INT));
             if (DBG) log("getWfcMode (roaming) - setting=" + setting);
         }
         return setting;
@@ -848,15 +883,18 @@ public class ImsManager {
      * @param roaming {@code false} for home network setting, {@code true} for roaming  setting
      */
     public int getWfcModeForSlot(boolean roaming) {
+        int subId = getSubId(mPhoneId);
+        log("getWfcModeForSlot :: subId=" + subId);
         int setting = 0;
         if (!roaming) {
             setting = android.provider.Settings.Global.getInt(mContext.getContentResolver(),
-                    android.provider.Settings.Global.WFC_IMS_MODE, getIntCarrierConfigForSlot(
-                            CarrierConfigManager.KEY_CARRIER_DEFAULT_WFC_IMS_MODE_INT));
+                    android.provider.Settings.Global.WFC_IMS_MODE + subId,
+                    getIntCarrierConfigForSlot(
+                    CarrierConfigManager.KEY_CARRIER_DEFAULT_WFC_IMS_MODE_INT));
             if (DBG) log("getWfcModeForSlot - setting=" + setting);
         } else {
             setting = android.provider.Settings.Global.getInt(mContext.getContentResolver(),
-                    android.provider.Settings.Global.WFC_IMS_ROAMING_MODE,
+                    android.provider.Settings.Global.WFC_IMS_ROAMING_MODE + subId,
                     getIntCarrierConfigForSlot(
                             CarrierConfigManager.KEY_CARRIER_DEFAULT_WFC_IMS_ROAMING_MODE_INT));
             if (DBG) log("getWfcModeForSlot (roaming) - setting=" + setting);
@@ -895,21 +933,17 @@ public class ImsManager {
      * @param roaming {@code false} for home network setting, {@code true} for roaming setting
      */
     public void setWfcModeForSlot(int wfcMode, boolean roaming) {
+        int subId = getSubId(mPhoneId);
         if (!roaming) {
             if (DBG) log("setWfcModeForSlot - setting=" + wfcMode);
             android.provider.Settings.Global.putInt(mContext.getContentResolver(),
-                    android.provider.Settings.Global.WFC_IMS_MODE, wfcMode);
+                    android.provider.Settings.Global.WFC_IMS_MODE + subId, wfcMode);
         } else {
             if (DBG) log("setWfcModeForSlot (roaming) - setting=" + wfcMode);
             android.provider.Settings.Global.putInt(mContext.getContentResolver(),
-                    android.provider.Settings.Global.WFC_IMS_ROAMING_MODE, wfcMode);
+                    android.provider.Settings.Global.WFC_IMS_ROAMING_MODE + subId, wfcMode);
         }
 
-        int[] subIds = SubscriptionManager.getSubId(mPhoneId);
-        int subId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
-        if (subIds != null && subIds.length >= 1) {
-            subId = subIds[0];
-        }
         TelephonyManager tm = (TelephonyManager)
                 mContext.getSystemService(Context.TELEPHONY_SERVICE);
         if (roaming == tm.isNetworkRoaming(subId)) {
@@ -970,11 +1004,13 @@ public class ImsManager {
      * Returns the user configuration of WFC roaming setting for slot
      */
     public boolean isWfcRoamingEnabledByUserForSlot() {
+        int subId = getSubId(mPhoneId);
         int enabled = android.provider.Settings.Global.getInt(mContext.getContentResolver(),
-                android.provider.Settings.Global.WFC_IMS_ROAMING_ENABLED,
+                android.provider.Settings.Global.WFC_IMS_ROAMING_ENABLED + subId,
                 getBooleanCarrierConfigForSlot(
                         CarrierConfigManager.KEY_CARRIER_DEFAULT_WFC_IMS_ROAMING_ENABLED_BOOL) ?
                         ImsConfig.FeatureValueConstants.ON : ImsConfig.FeatureValueConstants.OFF);
+        log("isWfcRoamingEnabledByUserForSlot :: subId=" + subId + " enabled=" + (enabled == 1));
         return (enabled == 1);
     }
 
@@ -998,8 +1034,10 @@ public class ImsManager {
      * Change persistent WFC roaming enabled setting
      */
     public void setWfcRoamingSettingForSlot(boolean enabled) {
+        int subId = getSubId(mPhoneId);
+        log("isWfcRoamingEnabledByUserForSlot :: subId=" + subId + " enabled=" + enabled);
         android.provider.Settings.Global.putInt(mContext.getContentResolver(),
-                android.provider.Settings.Global.WFC_IMS_ROAMING_ENABLED,
+                android.provider.Settings.Global.WFC_IMS_ROAMING_ENABLED + subId,
                 enabled ? ImsConfig.FeatureValueConstants.ON
                         : ImsConfig.FeatureValueConstants.OFF);
 
@@ -1073,7 +1111,8 @@ public class ImsManager {
     private static boolean isGbaValid(Context context) {
         if (getBooleanCarrierConfig(context,
                 CarrierConfigManager.KEY_CARRIER_IMS_GBA_REQUIRED_BOOL)) {
-            final TelephonyManager telephonyManager = TelephonyManager.getDefault();
+            final TelephonyManager telephonyManager = (TelephonyManager)
+                    context.getSystemService(Context.TELEPHONY_SERVICE);
             String efIst = telephonyManager.getIsimIst();
             if (efIst == null) {
                 loge("ISF is NULL");
@@ -1096,7 +1135,8 @@ public class ImsManager {
     private boolean isGbaValidForSlot() {
         if (getBooleanCarrierConfigForSlot(
                 CarrierConfigManager.KEY_CARRIER_IMS_GBA_REQUIRED_BOOL)) {
-            final TelephonyManager telephonyManager = TelephonyManager.getDefault();
+            final TelephonyManager telephonyManager = (TelephonyManager)
+                    mContext.getSystemService(Context.TELEPHONY_SERVICE);
             String efIst = telephonyManager.getIsimIst();
             if (efIst == null) {
                 loge("isGbaValidForSlot - ISF is NULL");
@@ -1199,7 +1239,9 @@ public class ImsManager {
      */
     public static void updateImsServiceConfig(Context context, int phoneId, boolean force) {
         if (!force) {
-            if (TelephonyManager.getDefault().getSimState() != TelephonyManager.SIM_STATE_READY) {
+            final TelephonyManager telephonyManager = (TelephonyManager)
+                    context.getSystemService(Context.TELEPHONY_SERVICE);
+            if (telephonyManager.getSimState(phoneId) != TelephonyManager.SIM_STATE_READY) {
                 log("updateImsServiceConfig: SIM not ready");
                 // Don't disable IMS if SIM is not ready
                 return;
@@ -1250,11 +1292,21 @@ public class ImsManager {
      */
     public void updateImsServiceConfigForSlot(boolean force) {
         if (!force) {
-            if (TelephonyManager.getDefault().getSimState() != TelephonyManager.SIM_STATE_READY) {
+            final TelephonyManager telephonyManager = (TelephonyManager)
+                    mContext.getSystemService(Context.TELEPHONY_SERVICE);
+            if (telephonyManager.getSimState(mPhoneId)
+                    != TelephonyManager.SIM_STATE_READY) {
                 log("updateImsServiceConfigForSlot: SIM not ready");
                 // Don't disable IMS if SIM is not ready
                 return;
             }
+        }
+
+        int subId = getSubId(mPhoneId);
+
+        if (!SubscriptionManager.from(mContext).isActiveSubId(subId)) {
+            log("updateImsServiceConfigForSlot: subId not active: " + subId);
+            return;
         }
 
         if (!mConfigUpdated || force) {
@@ -1327,7 +1379,7 @@ public class ImsManager {
         boolean enabled = isVtEnabledByUserForSlot();
         boolean isNonTty = isNonTtyOrTtyOnVolteEnabledForSlot();
         boolean isDataEnabled = isDataEnabled();
-        boolean ignoreDataEnabledChanged = getBooleanCarrierConfig(mContext,
+        boolean ignoreDataEnabledChanged = getBooleanCarrierConfigForSlot(
                 CarrierConfigManager.KEY_IGNORE_DATA_ENABLED_CHANGED_FOR_VIDEO_CALLS);
 
         boolean isFeatureOn = available && enabled && isNonTty
@@ -1355,17 +1407,22 @@ public class ImsManager {
      * @throws ImsException
      */
     private boolean updateWfcFeatureAndProvisionedValues() throws ImsException {
-        boolean isNetworkRoaming = TelephonyManager.getDefault().isNetworkRoaming();
+        boolean roaming = isWfcRoamingEnabledByUserForSlot();
         boolean available = isWfcEnabledByPlatformForSlot();
         boolean enabled = isWfcEnabledByUserForSlot();
+        final int subId = getSubId(mPhoneId);
+        final TelephonyManager telephonyManager = (TelephonyManager)
+                mContext.getSystemService(Context.TELEPHONY_SERVICE);
+        boolean isNetworkRoaming = telephonyManager.isNetworkRoaming(subId);
+        updateDefaultWfcModeForSlot();
         int mode = getWfcModeForSlot(isNetworkRoaming);
-        boolean roaming = isWfcRoamingEnabledByUserForSlot();
         boolean isFeatureOn = available && enabled;
 
         log("updateWfcFeatureAndProvisionedValues: available = " + available
                 + ", enabled = " + enabled
                 + ", mode = " + mode
-                + ", roaming = " + roaming);
+                + ", roaming = " + roaming
+                + ", isNetworkRoaming = " + isNetworkRoaming);
 
         getConfigInterface().setFeatureValue(
                 ImsConfig.FeatureConstants.FEATURE_TYPE_VOICE_OVER_WIFI,
@@ -1379,7 +1436,7 @@ public class ImsManager {
             mode = ImsConfig.WfcModeFeatureValueConstants.CELLULAR_PREFERRED;
             roaming = false;
         }
-        setWfcModeInternal(mContext, mode);
+        setWfcModeInternalForSlot(mode);
         setWfcRoamingSettingInternal(roaming);
 
         return isFeatureOn;
@@ -1408,14 +1465,22 @@ public class ImsManager {
     }
 
     /*
-     * Returns a flag indicating whether the IMS service is available.
+     * Returns a flag indicating whether the IMS service is available. If it is not available,
+     * it will try to connect before reporting failure.
      */
     public boolean isServiceAvailable() {
-        if (mImsServiceProxy == null) {
-            createImsService();
-        }
+        connectIfServiceIsAvailable();
         // mImsServiceProxy will always create an ImsServiceProxy.
         return mImsServiceProxy.isBinderAlive();
+    }
+
+    /**
+     * If the service is available, try to reconnect.
+     */
+    public void connectIfServiceIsAvailable() {
+        if (mImsServiceProxy == null || !mImsServiceProxy.isBinderAlive()) {
+            createImsService();
+        }
     }
 
     public void setImsConfigListener(ImsConfigListener listener) {
@@ -1705,8 +1770,9 @@ public class ImsManager {
 
         call.setListener(listener);
         ImsCallSession session = createCallSession(sessionId, profile);
-
-        if ((callees != null) && (callees.length == 1)) {
+        boolean isConferenceUri = profile.getCallExtraBoolean(
+                TelephonyProperties.EXTRAS_IS_CONFERENCE_URI, false);
+        if (!isConferenceUri && (callees != null) && (callees.length == 1)) {
             call.start(session, callees[0]);
         } else {
             call.start(session, callees);
@@ -1878,11 +1944,7 @@ public class ImsManager {
      * @return boolean value of corresponding key.
      */
     private boolean getBooleanCarrierConfigForSlot(String key) {
-        int[] subIds = SubscriptionManager.getSubId(mPhoneId);
-        int subId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
-        if (subIds != null && subIds.length >= 1) {
-            subId = subIds[0];
-        }
+        int subId = getSubId(mPhoneId);
         PersistableBundle b = null;
         if (mConfigManager != null) {
             // If an invalid subId is used, this bundle will contain default values.
@@ -1927,11 +1989,7 @@ public class ImsManager {
      * @return integer value of corresponding key.
      */
     private int getIntCarrierConfigForSlot(String key) {
-        int[] subIds = SubscriptionManager.getSubId(mPhoneId);
-        int subId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
-        if (subIds != null && subIds.length >= 1) {
-            subId = subIds[0];
-        }
+        int subId = getSubId(mPhoneId);
         PersistableBundle b = null;
         if (mConfigManager != null) {
             // If an invalid subId is used, this bundle will contain default values.
@@ -2108,7 +2166,7 @@ public class ImsManager {
                         TelephonyManager.NETWORK_TYPE_LTE, turnOn ? 1 : 0, mImsConfigListener);
 
                 if (isVolteEnabledByPlatformForSlot()) {
-                    boolean ignoreDataEnabledChanged = getBooleanCarrierConfig(mContext,
+                    boolean ignoreDataEnabledChanged = getBooleanCarrierConfigForSlot(
                             CarrierConfigManager.KEY_IGNORE_DATA_ENABLED_CHANGED_FOR_VIDEO_CALLS);
                     boolean enableViLte = turnOn && isVtEnabledByUserForSlot() &&
                             (ignoreDataEnabledChanged || isDataEnabled());
@@ -2125,7 +2183,7 @@ public class ImsManager {
 
     private void setAdvanced4GMode(boolean turnOn) throws ImsException {
         checkAndThrowExceptionIfServiceUnavailable();
-
+        log("setAdvanced4GMode :: turnOn=" + turnOn);
         // if turnOn: first set feature values then call turnOnIms()
         // if turnOff: only set feature values if IMS turn off is not allowed. If turn off is
         // allowed, first call turnOffIms() then set feature values
@@ -2431,34 +2489,35 @@ public class ImsManager {
      * @hide
      */
     public void factoryResetSlot() {
+        int subId = getSubId(mPhoneId);
         // Set VoLTE to default
         android.provider.Settings.Global.putInt(mContext.getContentResolver(),
-                android.provider.Settings.Global.ENHANCED_4G_MODE_ENABLED,
+                android.provider.Settings.Global.ENHANCED_4G_MODE_ENABLED + subId,
                 ImsConfig.FeatureValueConstants.ON);
 
         // Set VoWiFi to default
         android.provider.Settings.Global.putInt(mContext.getContentResolver(),
-                android.provider.Settings.Global.WFC_IMS_ENABLED,
+                android.provider.Settings.Global.WFC_IMS_ENABLED + subId,
                 getBooleanCarrierConfigForSlot(
                         CarrierConfigManager.KEY_CARRIER_DEFAULT_WFC_IMS_ENABLED_BOOL) ?
                         ImsConfig.FeatureValueConstants.ON : ImsConfig.FeatureValueConstants.OFF);
 
         // Set VoWiFi mode to default
         android.provider.Settings.Global.putInt(mContext.getContentResolver(),
-                android.provider.Settings.Global.WFC_IMS_MODE,
+                android.provider.Settings.Global.WFC_IMS_MODE + subId,
                 getIntCarrierConfigForSlot(
                         CarrierConfigManager.KEY_CARRIER_DEFAULT_WFC_IMS_MODE_INT));
 
         // Set VoWiFi roaming to default
         android.provider.Settings.Global.putInt(mContext.getContentResolver(),
-                android.provider.Settings.Global.WFC_IMS_ROAMING_ENABLED,
+                android.provider.Settings.Global.WFC_IMS_ROAMING_ENABLED + subId,
                 getBooleanCarrierConfigForSlot(
                         CarrierConfigManager.KEY_CARRIER_DEFAULT_WFC_IMS_ROAMING_ENABLED_BOOL) ?
                         ImsConfig.FeatureValueConstants.ON : ImsConfig.FeatureValueConstants.OFF);
 
         // Set VT to default
         android.provider.Settings.Global.putInt(mContext.getContentResolver(),
-                android.provider.Settings.Global.VT_IMS_ENABLED,
+                android.provider.Settings.Global.VT_IMS_ENABLED + subId,
                 ImsConfig.FeatureValueConstants.ON);
 
         // Push settings to ImsConfig
@@ -2466,7 +2525,8 @@ public class ImsManager {
     }
 
     private boolean isDataEnabled() {
-        return SystemProperties.getBoolean(DATA_ENABLED_PROP, true);
+        int subId = getSubId(mPhoneId);
+        return SystemProperties.getBoolean(DATA_ENABLED_PROP + subId, true);
     }
 
     /**
@@ -2474,41 +2534,51 @@ public class ImsManager {
      * @param enabled True if data is enabled, otherwise disabled.
      */
     public void setDataEnabled(boolean enabled) {
+        int subId = getSubId(mPhoneId);
         log("setDataEnabled: " + enabled);
-        SystemProperties.set(DATA_ENABLED_PROP, enabled ? TRUE : FALSE);
+        SystemProperties.set(DATA_ENABLED_PROP + subId, enabled ? TRUE : FALSE);
     }
 
     private boolean isVolteProvisioned() {
-        return SystemProperties.getBoolean(VOLTE_PROVISIONED_PROP, true);
+        int subId = getSubId(mPhoneId);
+        return SystemProperties.getBoolean(VOLTE_PROVISIONED_PROP + subId, true);
     }
 
     private void setVolteProvisionedProperty(boolean provisioned) {
-        SystemProperties.set(VOLTE_PROVISIONED_PROP, provisioned ? TRUE : FALSE);
+        int subId = getSubId(mPhoneId);
+        SystemProperties.set(VOLTE_PROVISIONED_PROP + subId, provisioned ? TRUE : FALSE);
     }
 
     private boolean isWfcProvisioned() {
-        return SystemProperties.getBoolean(WFC_PROVISIONED_PROP, true);
+        int subId = getSubId(mPhoneId);
+        return SystemProperties.getBoolean(WFC_PROVISIONED_PROP + subId, true);
     }
 
     private void setWfcProvisionedProperty(boolean provisioned) {
-        SystemProperties.set(WFC_PROVISIONED_PROP, provisioned ? TRUE : FALSE);
+        int subId = getSubId(mPhoneId);
+        SystemProperties.set(WFC_PROVISIONED_PROP + subId, provisioned ? TRUE : FALSE);
     }
 
     private boolean isVtProvisioned() {
-        return SystemProperties.getBoolean(VT_PROVISIONED_PROP, true);
+        int subId = getSubId(mPhoneId);
+        return SystemProperties.getBoolean(VT_PROVISIONED_PROP + subId, true);
     }
 
     private void setVtProvisionedProperty(boolean provisioned) {
-        SystemProperties.set(VT_PROVISIONED_PROP, provisioned ? TRUE : FALSE);
+        int subId = getSubId(mPhoneId);
+        SystemProperties.set(VT_PROVISIONED_PROP + subId, provisioned ? TRUE : FALSE);
     }
 
     public void dump(FileDescriptor fd, PrintWriter pw, String[] args) {
+        final TelephonyManager telephonyManager = (TelephonyManager)
+                mContext.getSystemService(Context.TELEPHONY_SERVICE);
+        final int subId = getSubId(mPhoneId);
         pw.println("ImsManager:");
         pw.println("  mPhoneId = " + mPhoneId);
         pw.println("  mConfigUpdated = " + mConfigUpdated);
         pw.println("  mImsServiceProxy = " + mImsServiceProxy);
         pw.println("  mDataEnabled = " + isDataEnabled());
-        pw.println("  ignoreDataEnabledChanged = " + getBooleanCarrierConfig(mContext,
+        pw.println("  ignoreDataEnabledChanged = " + getBooleanCarrierConfigForSlot(
                 CarrierConfigManager.KEY_IGNORE_DATA_ENABLED_CHANGED_FOR_VIDEO_CALLS));
 
         pw.println("  isGbaValid = " + isGbaValidForSlot());
@@ -2524,11 +2594,21 @@ public class ImsManager {
 
         pw.println("  isWfcEnabledByPlatform = " + isWfcEnabledByPlatformForSlot());
         pw.println("  isWfcEnabledByUser = " + isWfcEnabledByUserForSlot());
-        pw.println("  getWfcMode = " + getWfcModeForSlot());
+        pw.println("  getWfcMode = " + getWfcModeForSlot(telephonyManager.isNetworkRoaming(subId)));
         pw.println("  isWfcRoamingEnabledByUser = " + isWfcRoamingEnabledByUserForSlot());
 
         pw.println("  isVtProvisionedOnDevice = " + isVtProvisionedOnDeviceForSlot());
         pw.println("  isWfcProvisionedOnDevice = " + isWfcProvisionedOnDeviceForSlot());
         pw.flush();
+    }
+
+    private int getSubId(int phoneId) {
+        final int[] subIds = SubscriptionManager.getSubId(phoneId);
+        int subId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
+        if (subIds != null && subIds.length >= 1) {
+            subId = subIds[0];
+        }
+
+        return subId;
     }
 }
