@@ -1628,64 +1628,6 @@ public class ImsCall implements ICall {
         }
     }
 
-    public void sendRttMessage(String rttMessage) {
-        synchronized(mLockObj) {
-            if (mSession == null) {
-                loge("sendRttMessage::no session");
-            }
-            if (!mCallProfile.mMediaProfile.isRttCall()) {
-                logi("sendRttMessage::Not an rtt call, ignoring");
-                return;
-            }
-            mSession.sendRttMessage(rttMessage);
-        }
-    }
-
-    /**
-     * Sends a user-requested RTT upgrade request.
-     */
-    public void sendRttModifyRequest() {
-        logi("sendRttModifyRequest");
-
-        synchronized(mLockObj) {
-            if (mSession == null) {
-                loge("sendRttModifyRequest::no session");
-            }
-            if (mCallProfile.mMediaProfile.isRttCall()) {
-                logi("sendRttModifyRequest::Already RTT call, ignoring.");
-                return;
-            }
-            // Make a copy of the current ImsCallProfile and modify it to enable RTT
-            Parcel p = Parcel.obtain();
-            mCallProfile.writeToParcel(p, 0);
-            ImsCallProfile requestedProfile = new ImsCallProfile(p);
-            requestedProfile.mMediaProfile.setRttMode(ImsStreamMediaProfile.RTT_MODE_FULL);
-
-            mSession.sendRttModifyRequest(requestedProfile);
-        }
-    }
-
-    /**
-     * Sends the user's response to a remotely-issued RTT upgrade request
-     *
-     * @param textStream A valid {@link Connection.RttTextStream} if the user
-     *                   accepts, {@code null} if not.
-     */
-    public void sendRttModifyResponse(boolean status) {
-        logi("sendRttModifyResponse");
-
-        synchronized(mLockObj) {
-            if (mSession == null) {
-                loge("sendRttModifyResponse::no session");
-            }
-            if (mCallProfile.mMediaProfile.isRttCall()) {
-                logi("sendRttModifyResponse::Already RTT call, ignoring.");
-                return;
-            }
-            mSession.sendRttModifyResponse(status);
-        }
-    }
-
     private void clear(ImsReasonInfo lastReasonInfo) {
         mInCall = false;
         mHold = false;
