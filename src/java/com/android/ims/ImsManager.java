@@ -50,6 +50,7 @@ import com.android.ims.internal.IImsMultiEndpoint;
 import com.android.ims.internal.IImsUt;
 import android.telephony.ims.ImsCallSession;
 import com.android.internal.annotations.VisibleForTesting;
+import com.android.internal.telephony.TelephonyProperties;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
@@ -1278,6 +1279,12 @@ public class ImsManager {
             }
         }
 
+        int subId = getSubId();
+        if (!SubscriptionManager.from(mContext).isActiveSubId(subId)) {
+            log("updateImsServiceConfigForSlot: subId not active: " + subId);
+            return;
+        }
+
         if (!mConfigUpdated || force) {
             try {
                 // TODO: Extend ImsConfig API and set all feature values in single function call.
@@ -1376,7 +1383,8 @@ public class ImsManager {
         log("updateWfcFeatureAndProvisionedValues: available = " + available
                 + ", enabled = " + enabled
                 + ", mode = " + mode
-                + ", roaming = " + roaming);
+                + ", roaming = " + roaming
+                + ", isNetworkRoaming = " + isNetworkRoaming);
 
         changeMmTelCapability(MmTelFeature.MmTelCapabilities.CAPABILITY_TYPE_VOICE,
                 ImsRegistrationImplBase.REGISTRATION_TECH_IWLAN, isFeatureOn);
@@ -1605,6 +1613,29 @@ public class ImsManager {
     }
 
     /**
+     * Removes the MMTel capability callback.
+     *
+     * @param callback Previously registered callback that will be removed. Can not be null.
+     * @throws ImsException if calling the IMS service results in an error
+     * instead.
+     */
+    public void removeCapabilitiesCallback(ImsFeature.CapabilityCallback callback)
+        throws ImsException {
+        if (callback == null) {
+            throw new NullPointerException("capabilities callback can't be null");
+        }
+
+        checkAndThrowExceptionIfServiceUnavailable();
+        try {
+            mMmTelFeatureConnection.removeCapabilityCallback(callback);
+            log("Capability Callback removeed.");
+        } catch (RemoteException e) {
+            throw new ImsException("removeCapabilitiesCallback(IF)", e,
+                    ImsReasonInfo.CODE_LOCAL_IMS_SERVICE_DOWN);
+        }
+    }
+
+    /**
      * Removes the registration listener from the IMS service.
      *
      * @param listener Previously registered listener that will be removed. Can not be null.
@@ -1732,8 +1763,10 @@ public class ImsManager {
 
         call.setListener(listener);
         ImsCallSession session = createCallSession(profile);
+        boolean isConferenceUri = profile.getCallExtraBoolean(
+                TelephonyProperties.EXTRAS_IS_CONFERENCE_URI, false);
 
-        if ((callees != null) && (callees.length == 1)) {
+        if (!isConferenceUri && (callees != null) && (callees.length == 1)) {
             call.start(session, callees[0]);
         } else {
             call.start(session, callees);
